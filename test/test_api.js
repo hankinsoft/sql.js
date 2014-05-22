@@ -18,7 +18,7 @@ var stmt = db.prepare("INSERT INTO alphabet (letter,code) VALUES (?,?)");
 console.log("Testing Statement.run()");
 // Execute the statement several times
 stmt.run(['a',1]);
-stmt.run(['b',2]);
+stmt.run(['b',2.2]);
 stmt.run(['c']); // The second parameter will be bound to NULL
 
 console.log("Testing statement.free()");
@@ -26,7 +26,7 @@ console.log("Testing statement.free()");
 stmt.free();
 
 result = db.exec("SELECT * FROM alphabet");
-assert.deepEqual(result, [{columns:['letter', 'code'], values:[['a','1'],['b','2'],['c','']]}]);
+assert.deepEqual(result, [{columns:['letter', 'code'], values:[['a','1'],['b','2.2'],['c','']]}]);
 
 console.log("Testing getting data...");
 // Prepare an sql statement
@@ -42,7 +42,7 @@ assert.deepEqual(result, ['a',1]);
 result = stmt.step();
 assert.equal(result, true);
 result = stmt.get();
-assert.deepEqual(result, ['b',2]);
+assert.deepEqual(result, ['b',2.2]);
 
 // Reset and reuse at once
 result = stmt.get([0, 1]);
@@ -69,5 +69,5 @@ assert(String.fromCharCode.apply(null,binaryArray.slice(0,6)) === 'SQLite',
 
 var db2 = new SQL.Database(binaryArray);
 result = db2.exec("SELECT * FROM alphabet");
-assert.deepEqual(result, [{columns:['letter', 'code'], values:[['a','1'],['b','2'],['c','']]}],
+assert.deepEqual(result, [{columns:['letter', 'code'], values:[['a','1'],['b','2.2'],['c','']]}],
                 "Exporting and re-importing the database should lead to the same values");

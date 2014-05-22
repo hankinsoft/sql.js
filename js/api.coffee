@@ -119,7 +119,9 @@ class Statement
 	# @private
 	# @nodoc
 	bindString: (string, pos = @pos++) ->
-		ret = sqlite3_bind_text @stmt, pos, string, -1, NULL
+		strptr = allocate intArrayFromString(string), 'i8', ALLOC_NORMAL
+		strfree = Runtime.addFunction -> _free strptr
+		ret = sqlite3_bind_text @stmt, pos, strptr, -1, strfree
 		if ret is SQLite.OK then return true
 		err = handleErrors ret
 		if err isnt null then throw 'SQLite error : ' + err
@@ -239,8 +241,10 @@ sqlite3_free = Module['cwrap'] 'sqlite3_free', '', ['number']
 ## prepare
 sqlite3_prepare_v2 = Module['cwrap'] 'sqlite3_prepare_v2', 'number', ['number', 'string', 'number', 'number', 'number']
 ## Bind parameters
+
 #int sqlite3_bind_text(sqlite3_stmt*, int, const char*, int n, void(*)(void*));
-sqlite3_bind_text = Module['cwrap'] 'sqlite3_bind_text', 'number', ['number', 'number', 'string', 'number', 'number']
+# We declare const char* as a number, because we will manually allocate the memory and pass a pointer to the function
+sqlite3_bind_text = Module['cwrap'] 'sqlite3_bind_text', 'number', ['number', 'number', 'number', 'number', 'number']
 #int sqlite3_bind_double(sqlite3_stmt*, int, double);
 sqlite3_bind_double = Module['cwrap'] 'sqlite3_bind_double', 'number', ['number', 'number', 'number']
 #int sqlite3_bind_double(sqlite3_stmt*, int, int);
