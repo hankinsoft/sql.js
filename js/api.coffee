@@ -1,3 +1,5 @@
+#@copyright Ophir LOJKINE
+
 apiTemp = Runtime.stackAlloc(4);
 
 SQLite = {
@@ -29,9 +31,50 @@ callbackTemp = Runtime.addFunction (notUsed, argc, argv, colNames) ->
 	# If the callback returns non-zero, the query is aborted
 	return 0
 
+# Represents an prepared statement
 class Statement
+	# Statements can't be created by the API user, only by Database::prepare
+	# @private
+	# @nodoc
 	constructor: (@stmt) ->
 		@pos = 1 # Index of the leftmost parameter is 1
+
+	### Bind values to the parameters
+
+	SQL statements can have parameters, named *'?', '?NNN', ':VVV', '@VVV', '$VVV'*,
+	where NNN is a number and VVV a string.
+	This function binds these parameters to the given values.
+
+	*Warning*: ':', '@', and '$' are included in the parameters names
+
+	## Binding values to named parameters
+	@example Bind values to named parameters
+		var stmt = db.prepare("UPDATE test SET a=@newval WHERE id BETWEEN $mini AND $maxi");
+		stmt.bind({$mini:10, $maxi:20, '@newval':5});
+	- Create a statement that contains parameters like '$VVV', ':VVV', '@VVV'
+	- Call Statement.bind with an object as parameter
+
+	## Binding values to parameters
+	@example Bind values to anonymous parameters
+		var stmt = db.prepare("UPDATE test SET a=? WHERE id BETWEEN ? AND ?");
+		stmt.bind([5, 10, 20]);
+	 - Create a statement that contains parameters like '?', '?NNN'
+	 - Call Statement.bind with an array as parameter
+
+	@see http://www.sqlite.org/lang_expr.html#varparam
+	@param values [Array,Object] The values to bind
+	@return [Boolean] true if it worked
+	@throw [String] SQLite Error
+	###
+	'bind' : (values) ->
+		@['reset']()
+		if Array.isArray values then @bindFromArray values else @bindFromObject values
+
+	### Execute the statement
+	Execute the statement, fetching the the next line of result, that can be retrieved with get
+	@return [Boolean] true if a row of result available
+	@throw [String] SQLite Error
+	###
 	'step': ->
 		@pos = 1
 		ret = sqlite3_step @stmt
@@ -39,12 +82,22 @@ class Statement
 		else if ret is SQLite.DONE then return false
 		else throw 'SQLite error: ' + handleErrors ret
 
+	# Internal methods to retrieve data from the results of a statement that has been executed
+	# @nodoc
 	getNumber: (pos = @pos++) -> sqlite3_column_double @stmt, pos
+	# @nodoc
 	getString: (pos = @pos++) -> sqlite3_column_text @stmt, pos
-	'run': (values) ->
-		if values? then @['bind'](values)
-		@['step']()
-		@['reset']()
+
+	### Get one row of results of a statement.
+	If the first parameter is not provided, step must have been called before get.
+	@param [Array,Object] Optional: If set, the values will be bound to the statement, and it will be executed
+	@return [Array] One row of result
+
+	@example Print all the rows of the table test to the console
+
+		var stmt = db.prepare("SELECT * FROM test");
+		while (stmt.step()) console.log(stmt.get());
+	###
 	'get': (values) -> # Get all fields
 		if values? then @['bind'](values) and @['step']()
 		for field in [0 ... sqlite3_data_count(@stmt)]
@@ -52,38 +105,72 @@ class Statement
 			if type in [SQLite.INTEGER, SQLite.FLOAT] then @getNumber field
 			else if type in [SQLite.TEXT, SQLite.BLOB] then @getString field
 			else null
+
+	### Shorthand for bind + step + reset
+	Bind the values, execute the statement, ignoring the rows it returns, and resets it
+	@param [Array,Object] Value to bind to the statement
+	###
+	'run': (values) ->
+		if values? then @['bind'](values)
+		@['step']()
+		@['reset']()
+
+	# Internal methods to bind values to parameters
+	# @private
+	# @nodoc
 	bindString: (string, pos = @pos++) ->
 		ret = sqlite3_bind_text @stmt, pos, string, -1, NULL
 		if ret is SQLite.OK then return true
 		err = handleErrors ret
 		if err isnt null then throw 'SQLite error : ' + err
+	# @private
+	# @nodoc
 	bindNumber: (num, pos = @pos++) ->
 		bindfunc = if num is (num|0) then sqlite3_bind_int else sqlite3_bind_double
 		ret = bindfunc @stmt, pos, num
 		if ret is SQLite.OK then return true
 		err = handleErrors ret
 		if err isnt null then throw 'SQLite error : ' + err
+	# Call bindNumber or bindString appropriatly
+	# @private
+	# @nodoc
 	bindValue: (val, pos = @pos++) ->
 		switch typeof val
 			when "string" then @bindString val, pos
 			when "number" then @bindNumber val, pos
+	### Bind names and values of an object to the named parameters of the statement
+	@param [Object]
+	@private
+	@nodoc
+	###
 	bindFromObject : (valuesObj) ->
 		for name, value of valuesObj
 			num = sqlite3_bind_parameter_index @stmt, name
 			if num isnt 0 then @bindValue value, num
 		return true
+	### Bind values to numbered parameters
+	@param [Array]
+	@private
+	@nodoc
+	###
 	bindFromArray : (values) ->
 		@bindValue value, num+1 for value,num in values
 		return true
-	'bind' : (values) ->
-		@['reset']()
-		if Array.isArray values then @bindFromArray values else @bindFromObject values
+
+	### Reset a statement, so that it's parameters can be bound to new values
+	It also clears all previous bindings
+	###
 	'reset' : -> sqlite3_reset(@stmt) is SQLite.OK and sqlite3_clear_bindings(@stmt) is SQLite.OK
+	### Free the memory used by the statement
+	@return [Boolean] true in case of success
+	###
 	'free': -> sqlite3_finalize(@stmt) is SQLite.OK
 
+# Represents an SQLite database
 class Database
 	# Open a new database either by creating a new one or opening an existing one,
 	# stored in the byte array passed in first argument
+	# @param data [Array<Integer>] An array of bytes representing an SQLite database file
 	constructor: (data) ->
 		@filename = 'dbfile_' + (0xffffffff*Math.random()>>>0)
 		if data? then FS.createDataFile '/', @filename, data, true, true
@@ -91,14 +178,10 @@ class Database
 		if ret isnt SQLite.OK then throw 'SQLite error: ' + SQLite.errorMessages[ret]
 		@db = getValue(apiTemp, 'i32')
 
-	# Close the database
-	'close': ->
-		ret = sqlite3_close @db
-		if ret isnt 0 then throw 'SQLite error: ' + SQLite_codes[ret].msg
-		FS.unlink '/' + @filename
-		@db = null
-
-	# Execute an SQL query, and returns the result
+	### Execute an SQL query, and returns the result
+	@param sql [String] a string containing some SQL text to execute
+	@return [Array<QueryResults>] An array of results.
+	###
 	'exec': (sql) ->
 		if not @db then throw "Database closed"
 		dataTemp = []
@@ -108,7 +191,11 @@ class Database
 		if err isnt null then throw 'SQLite error : ' + err
 		return dataTemp
 
-	# Prepare an SQL statement
+	### Prepare an SQL statement
+	@param sql [String] a string of SQL, that can contain placeholders ('?', ':VVV', ':AAA', '@AAA')
+	@return [Statement] the resulting statement
+	@throw [String] SQLite error
+	###
 	'prepare': (sql) ->
 		setValue apiTemp, 0, 'i32'
 		ret = sqlite3_prepare_v2 @db, sql, -1, apiTemp, NULL
@@ -118,8 +205,19 @@ class Database
 		if pStmt is NULL then throw 'Nothing to prepare'
 		return new Statement(pStmt)
 
-	# Exports the contents of the database to a binary array
+	### Exports the contents of the database to a binary array
+	@return [Uint8Array] An array of bytes of the SQLite3 database file
+	###
 	'export': -> new Uint8Array FS.root.contents[@filename].contents
+
+	### Close the database
+	Databases must be closed, or the memory consumption will grow forever
+	###
+	'close': ->
+		ret = sqlite3_close @db
+		if ret isnt 0 then throw 'SQLite error: ' + SQLite_codes[ret].msg
+		FS.unlink '/' + @filename
+		@db = null
 
 handleErrors = (ret, errPtrPtr) ->
 	if not errPtrPtr
