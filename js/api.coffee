@@ -32,15 +32,21 @@ callbackTemp = Runtime.addFunction (notUsed, argc, argv, colNames) ->
 class Statement
 	constructor: (@stmt) ->
 		@pos = 1 # Index of the leftmost parameter is 1
-	step: ->
+	'step': ->
 		@pos = 1
 		ret = sqlite3_step @stmt
 		if ret is SQLite.ROW then return true
 		else if ret is SQLite.DONE then return false
 		else throw 'SQLite error: ' + handleErrors ret
+
 	getNumber: (pos = @pos++) -> sqlite3_column_double @stmt, pos
 	getString: (pos = @pos++) -> sqlite3_column_text @stmt, pos
-	'get': -> # Get all fields
+	'run': (values) ->
+		if values? then @['bind'](values)
+		@['step']()
+		@['reset']()
+	'get': (values) -> # Get all fields
+		if values? then @['bind'](values) and @['step']()
 		for field in [0 ... sqlite3_data_count(@stmt)]
 			type = sqlite3_column_type @stmt, field
 			if type in [SQLite.INTEGER, SQLite.FLOAT] then @getNumber field
@@ -48,10 +54,13 @@ class Statement
 			else null
 	bindString: (string, pos = @pos++) ->
 		ret = sqlite3_bind_text @stmt, pos, string, -1, NULL
+		if ret is SQLite.OK then return true
 		err = handleErrors ret
 		if err isnt null then throw 'SQLite error : ' + err
 	bindNumber: (num, pos = @pos++) ->
-		ret = sqlite3_bind_double @stmt, pos, num
+		bindfunc = if num is (num|0) then sqlite3_bind_int else sqlite3_bind_double
+		ret = bindfunc @stmt, pos, num
+		if ret is SQLite.OK then return true
 		err = handleErrors ret
 		if err isnt null then throw 'SQLite error : ' + err
 	bindValue: (val, pos = @pos++) ->
@@ -60,14 +69,15 @@ class Statement
 			when "number" then @bindNumber val, pos
 			# Not binding a parameter is the same as binding it to NULL
 	'bind' : (values) ->
+		@['reset']()
 		@bindValue v,i+1 for v,i in values # Index of the leftmost parameter is 1
-		null
-	'reset' : -> sqlite3_reset @stmt
-	'free': -> sqlite3_finalize @stmt
+		return true
+	'reset' : -> sqlite3_reset(@stmt) is SQLite.OK
+	'free': -> sqlite3_finalize(@stmt) is SQLite.OK
 
 class Database
-	# Open a new database:
-	#create a new one or open an existing database stored in the byte array passed in first argument
+	# Open a new database either by creating a new one or opening an existing one,
+	# stored in the byte array passed in first argument
 	constructor: (data) ->
 		@filename = 'dbfile_' + (0xffffffff*Math.random()>>>0)
 		if data? then FS.createDataFile '/', @filename, data, true, true
@@ -117,7 +127,7 @@ handleErrors = (ret, errPtrPtr) ->
 		else return null
 
 sqlite3_open = Module['cwrap'] 'sqlite3_open', 'number', ['string', 'number']
-sqlite3_close = Module['cwrap'] 'sqlite3_close', 'number', ['number'];
+sqlite3_close = Module['cwrap'] 'sqlite3_close', 'number', ['number']
 sqlite3_exec = Module['cwrap'] 'sqlite3_exec', 'number', ['number', 'string', 'number', 'number', 'number']
 sqlite3_free = Module['cwrap'] 'sqlite3_free', '', ['number']
 
@@ -129,6 +139,8 @@ sqlite3_prepare_v2 = Module['cwrap'] 'sqlite3_prepare_v2', 'number', ['number', 
 sqlite3_bind_text = Module['cwrap'] 'sqlite3_bind_text', 'number', ['number', 'number', 'string', 'number', 'number']
 #int sqlite3_bind_double(sqlite3_stmt*, int, double);
 sqlite3_bind_double = Module['cwrap'] 'sqlite3_bind_double', 'number', ['number', 'number', 'number']
+#int sqlite3_bind_double(sqlite3_stmt*, int, int);
+sqlite3_bind_int = Module['cwrap'] 'sqlite3_bind_int', 'number', ['number', 'number', 'number']
 
 ## Get values
 # int sqlite3_step(sqlite3_stmt*)

@@ -18,33 +18,42 @@ var db = new sql.Database();
 // NOTE: You can also use new sql.Database(data) where
 // data is an Uint8Array representing an SQLite database file
 
-// Execute some sql
-sqlstr = "CREATE TABLE hello (a int, b char);";
-sqlstr += "INSERT INTO hello VALUES (0, 'hello');"
-sqlstr += "INSERT INTO hello VALUES (1, 'world');"
+// Execute some sql (as understood by sqlite: http://www.sqlite.org/lang.html)
+sqlstr = "CREATE TABLE test (number, letter);";
 db.exec(sqlstr);
 
-// Prepare an sql statement
-var stmt = db.prepare("SELECT * FROM hello WHERE a=? AND b=?");
-
-// Bind values to the parameters
-stmt.bind([1, 'world']);
-
-// Fetch the results of the query
-while (stmt.step()) console.log(stmt.get()); // Will print [1, 'world']
-
-// Resets the statement, so it can be used again with other parameters
-stmt.reset()
-// Bind other values
-stmt.bind([0, 'hello']);
-while (stmt.step()) console.log(stmt.get()); // Will print [0, 'hello']
+// Prepare an SQL statement
+var insertstmt = db.prepare("INSERT INTO test (number, letter) VALUES (?,?)");
+insertstmt.run([1, 'a']); // Will run insert the row (1,'a') in the table test
+insertstmt.run([2, 'b']); // statement.run can be called multiple times with different values
+insertstmt.run([3, 'c']);
 
 // free the memory used by the statement
 stmt.free();
 // You can not use your statement anymore once it has been freed.
 // But not freeing your statements causes memory leaks. You don't want that.
 
-// Export the database to an Uint8Array containing the SQLite database file
+
+// Prepare a second sql statement
+var stmt = db.prepare("SELECT * FROM test WHERE number BETWEEN ? AND ?");
+
+// Bind values to the parameters
+stmt.bind([1, 1]);
+
+// Fetch the results of the query
+while (stmt.step()) console.log(stmt.get()); // Will print [1, 'a']
+
+// Resets the statement, so it can be used again with other parameters
+stmt.reset();
+
+// Bind other values
+stmt.bind([2, 3]);
+while (stmt.step()) console.log(stmt.get()); // Will print [2, 'b'] and [3,'c']
+
+// free the memory used by the statement
+stmt.free();
+
+// Export the database to an Uint8Array containing the bytes of the SQLite database file
 var binaryArray = db.export();
 ```
 
