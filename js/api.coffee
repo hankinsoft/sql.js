@@ -67,12 +67,18 @@ class Statement
 		switch typeof val
 			when "string" then @bindString val, pos
 			when "number" then @bindNumber val, pos
-			# Not binding a parameter is the same as binding it to NULL
+	bindFromObject : (valuesObj) ->
+		for name, value of valuesObj
+			num = sqlite3_bind_parameter_index @stmt, name
+			if num isnt 0 then @bindValue value, num
+		return true
+	bindFromArray : (values) ->
+		@bindValue value, num+1 for value,num in values
+		return true
 	'bind' : (values) ->
 		@['reset']()
-		@bindValue v,i+1 for v,i in values # Index of the leftmost parameter is 1
-		return true
-	'reset' : -> sqlite3_reset(@stmt) is SQLite.OK
+		if Array.isArray values then @bindFromArray values else @bindFromObject values
+	'reset' : -> sqlite3_reset(@stmt) is SQLite.OK and sqlite3_clear_bindings(@stmt) is SQLite.OK
 	'free': -> sqlite3_finalize(@stmt) is SQLite.OK
 
 class Database
@@ -141,6 +147,8 @@ sqlite3_bind_text = Module['cwrap'] 'sqlite3_bind_text', 'number', ['number', 'n
 sqlite3_bind_double = Module['cwrap'] 'sqlite3_bind_double', 'number', ['number', 'number', 'number']
 #int sqlite3_bind_double(sqlite3_stmt*, int, int);
 sqlite3_bind_int = Module['cwrap'] 'sqlite3_bind_int', 'number', ['number', 'number', 'number']
+#int sqlite3_bind_parameter_index(sqlite3_stmt*, const char *zName);
+sqlite3_bind_parameter_index = Module['cwrap'] 'sqlite3_bind_parameter_index', 'number', ['number', 'string']
 
 ## Get values
 # int sqlite3_step(sqlite3_stmt*)
@@ -152,6 +160,7 @@ sqlite3_column_text = Module['cwrap'] 'sqlite3_column_text', 'string', ['number'
 sqlite3_column_type = Module['cwrap'] 'sqlite3_column_type', 'number', ['number', 'number']
 # int sqlite3_reset(sqlite3_stmt *pStmt);
 sqlite3_reset = Module['cwrap'] 'sqlite3_reset', 'number', ['number']
+sqlite3_clear_bindings = Module['cwrap'] 'sqlite3_clear_bindings', 'number', ['number']
 # int sqlite3_finalize(sqlite3_stmt *pStmt);
 sqlite3_finalize = Module['cwrap'] 'sqlite3_finalize', 'number', ['number']
 
